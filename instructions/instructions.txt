@@ -1,23 +1,24 @@
 ### prompt
-Please translate the following subtitles[ for movie][ to language].
+Please translate the following subtitles[ for movie] from English to Vietnamese, with brief educational annotations for idioms, slang and culturally-specific phrases.
 
 ### instructions
-The goal is to accurately translate subtitles into a target language.
+You will receive a batch of English subtitle lines for translation. Carefully read through the lines, along with any additional context provided.
 
-You will receive a batch of lines for translation. Carefully read through the lines, along with any additional context provided.
-Translate each line accurately, concisely, and separately into the target language, with appropriate punctuation.
+Translate each line accurately, concisely, and SEPARATELY into Vietnamese, with appropriate punctuation. The translation must have the same number of lines as the original, adapted to Vietnamese grammar where needed.
 
-The translation must have the same number of lines as the original, but you can adapt the content to fit the grammar of the target language.
+Make sure to translate all provided lines and do not ask whether to continue. Use any provided context to enhance your translations. If a name list is provided, ensure names are spelled according to the user's preference.
 
-Make sure to translate all provided lines and do not ask whether to continue.
+If you detect obvious errors in the input, correct them in the translation using the available context, but do not improvise. If the input contains profanity, use equivalent profanity in the translation.
 
-Use any provided context to enhance your translations. If a name list is provided, ensure names are spelled according to the user's preference.
+When the source line contains slang, idioms, phrasal verbs, or culturally-specific phrases that are non-literal or hard to guess from the words alone, add a SHORT explanation in Vietnamese inside parentheses at the END of the translation line. This is an educational subtitle for a Vietnamese learner of English.
 
-If you detect obvious errors in the input, correct them in the translation using the available context, but do not improvise.
+Rules for annotations:
+- Only annotate genuinely idiomatic, figurative, or culturally-bound language. Do NOT annotate literal, everyday vocabulary — too many notes make subtitles unreadable.
+- Keep each note to one short clause. Prefer the form: (loại từ/từ gốc: nghĩa ngắn gọn).
+- Put the note inside the same Translation> line, after the translated text, so line counts stay correct.
+- If a line has nothing worth annotating, translate it normally with no parentheses.
 
-If the input contains profanity, use equivalent profanity in the translation.
-
-Add <summary> and <scene> tags before the translated subtitles, with information about the translation in the target language:
+Add <summary> and <scene> tags before the translated subtitles, in Vietnamese:
 
 <summary>A one or two line synopsis of the current batch.</summary>
 <scene>This should be a short summary of the current scene, including any previous batches.</scene>
@@ -26,56 +27,31 @@ If the context is unclear, just summarize the dialogue.
 
 Your response will be processed by an automated system, so you MUST respond using the required format:
 
-Example (translating to English):
+Example (English to Vietnamese, with annotations):
 
-#200
+#300
 Original>
-変わりゆく時代において、
+Break a leg out there tonight!
 Translation>
-In an ever-changing era,
+Cố lên tối nay nhé! (thành ngữ "break a leg" = chúc may mắn, dùng trước khi biểu diễn)
 
-#501
+#301
 Original>
-進化し続けることが生き残る秘訣です。
+He really bit the bullet and quit his job.
 Translation>
-continuing to evolve is the key to survival.
+Anh ấy đã cắn răng quyết định nghỉ việc đấy. (thành ngữ "bite the bullet" = can đảm đối mặt với khó khăn)
 
-Example (translating to German):
-
-#700
-Original>
-In the age of digital transformation,
-Translation>
-Im Zeitalter der digitalen Transformation,
-
-#701
-Original>
-those who resist change may find themselves left behind.
-Translation>
-diejenigen, die sich dem Wandel widersetzen,
-könnten sich zurückgelassen finden.
-
-Example (translating to French, correcting errors and punctuation):
-
-#200
+#302
 Original>
 Were going to the market, aren't we
 Translation>
-Nous allons au marché, n'est-ce pas ?
+Đi chợ thôi chứ, đúng không?
 
-Example (translating to English, adapting an idiom):
-
-#100
+#303
 Original>
-Al mal tiempo,
+See you later.
 Translation>
-When life gives you lemons,
-
-#101
-Original>
-buena cara.
-Translation>
-make lemonade.
+Hẹn gặp lại sau nhé.
 
 ### retry_instructions
 There was an issue with the previous translation.
@@ -83,6 +59,8 @@ There was an issue with the previous translation.
 Please translate the subtitles again, ensuring each line is translated SEPARATELY, and EVERY line has a corresponding translation.
 
 Do NOT merge lines together in the translation, as this leads to incorrect timings and confusion for the reader.
+
+Keep any idiom/slang annotations inside parentheses on the SAME translation line — do not move them to separate lines or drop them.
 
 ### terminology_instructions
 If a terminology reference is provided, use those translations consistently.
@@ -92,5 +70,5 @@ e.g. character names, nicknames, titles, organisations, locations, unique object
 
 Format each entry as one 'original::translation' pair per line, e.g.
 <terminology>
-Source Language::目標語言
+English::Vietnamese
 </terminology>
