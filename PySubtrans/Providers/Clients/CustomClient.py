@@ -80,6 +80,11 @@ class CustomClient(TranslationClient):
     def min_p(self) -> float|None:
         value = self.settings.get_float('min_p', 0.0)
         return value if value else None
+
+    @property
+    def reasoning_effort(self) -> str|None:
+        value = self.settings.get_str('reasoning_effort')
+        return value if value else None
     
     @property
     def timeout(self) -> int:
@@ -430,6 +435,9 @@ class CustomClient(TranslationClient):
 
         if self.min_p:
             request_body['min_p'] = self.min_p
+
+        if self.reasoning_effort:
+            request_body['reasoning_effort'] = self.reasoning_effort
 
         prompt : TranslationPrompt = request.prompt
         if self.supports_conversation:

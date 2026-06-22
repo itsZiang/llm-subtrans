@@ -44,6 +44,7 @@ class CustomServerProvider(TranslationProvider):
             'proxy': settings.get_str('proxy'),
             'repetition_penalty': settings.get_float('repetition_penalty', env_float('CUSTOM_REPETITION_PENALTY', 0.0)),
             'min_p': settings.get_float('min_p', env_float('CUSTOM_MIN_P', 0.0)),
+            'reasoning_effort': settings.get_str('reasoning_effort', os.getenv('CUSTOM_REASONING_EFFORT', "")),
             }))
 
         #TODO: Add additional parameters option
@@ -112,6 +113,7 @@ class CustomServerProvider(TranslationProvider):
                 'supports_parallel_threads': (bool, _("Use parallel threads for translation requests (may be faster but may not work with the server)")),
                 'repetition_penalty': (float, _("Penalise token repetition — values > 1.0 reduce repetitive output (0.0 to disable)")),
                 'min_p': (float, _("Minimum probability threshold for token sampling (0.0 to disable)")),
+                'reasoning_effort': (["", "none", "minimal", "low", "medium", "high"], _("Reasoning effort for reasoning-capable models (leave empty if the model doesn't support reasoning)")),
             })
 
         return options
