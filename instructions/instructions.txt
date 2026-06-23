@@ -1,5 +1,5 @@
 ### prompt
-Please translate the following subtitles for a movie from English to Vietnamese, with brief educational annotations for idioms, slang and culturally-specific phrases.
+Please translate the following subtitles[ for movie] from English to Vietnamese, with brief educational annotations for idioms, slang and culturally-specific phrases.
 
 ### instructions
 You will receive a batch of English subtitle lines for translation. Carefully read through the lines, along with any additional context provided (such as the scene setting, history of previous batches, or relationship between characters).
