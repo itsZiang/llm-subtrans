@@ -3,6 +3,8 @@ from datetime import timedelta
 from unittest.mock import patch
 
 from PySubtrans.Helpers.ContextHelpers import GetBatchContext
+from PySubtrans.Instructions import Instructions
+from PySubtrans.Options import Options
 from PySubtrans.Helpers.Parse import ParseNames
 from PySubtrans.Helpers.TestCases import LoggedTestCase
 from PySubtrans.Translation import Translation
@@ -15,6 +17,7 @@ from PySubtrans.SubtitleBatcher import SubtitleBatcher
 from PySubtrans.SubtitleEditor import SubtitleEditor
 from PySubtrans.SubtitleError import SubtitleError
 from PySubtrans.SubtitleLine import SubtitleLine
+from PySubtrans.TranslationPrompt import TranslationPrompt
 from PySubtrans.Subtitles import Subtitles
 from PySubtrans.SubtitleScene import SubtitleScene
 from PySubtrans.SubtitleTranslator import SubtitleTranslator
@@ -162,6 +165,171 @@ class SubtitleTranslatorTests(SubtitleTestCase):
         self.assertIsNotNone(parser.translated)
         self.assertEqual(parser.translated[-1].text, "bar")
         self.assertEqual(parser.errors, [])
+
+
+class TranslationAlignmentFixtureTests(SubtitleTestCase):
+    """Regression fixtures for responses that can silently corrupt alignment."""
+
+    def _parser(self) -> TranslationParser:
+        return TranslationParser("Translation", self.options)
+
+    def _lines(self) -> list[SubtitleLine]:
+        return [
+            SubtitleLine({'index': 10, 'text': 'First source line'}),
+            SubtitleLine({'index': 11, 'text': 'Second source line'}),
+        ]
+
+    def test_out_of_batch_line_is_error(self):
+        parser = self._parser()
+        parser.ProcessTranslation(Translation({'text': '#10\nTranslation>\nPrima\n\n#12\nTranslation>\nExtra'}))
+        parser.MatchTranslations(self._lines())
+        self.assertLoggedTrue("out of batch response rejected", any('outside the requested batch' in str(error) for error in parser.errors))
+
+    def test_missing_line_is_error(self):
+        parser = self._parser()
+        parser.ProcessTranslation(Translation({'text': '#10\nTranslation>\nPrima'}))
+        _, unmatched = parser.MatchTranslations(self._lines())
+        self.assertLoggedEqual("missing line count", 1, len(unmatched))
+        self.assertLoggedTrue("missing line response rejected", any('No translation found' in str(error) for error in parser.errors))
+
+    def test_duplicate_line_is_error(self):
+        parser = self._parser()
+        parser.ProcessTranslation(Translation({'text': '#10\nTranslation>\nOne\n\n#10\nTranslation>\nTwo'}))
+        self.assertLoggedTrue("duplicate line response rejected", any('Duplicate translation line numbers' in str(error) for error in parser.errors))
+
+    def test_echo_of_another_source_line_is_error(self):
+        parser = self._parser()
+        parser.ProcessTranslation(Translation({'text': '#10\nTranslation>\nSecond source line\n\n#11\nTranslation>\nDeuxieme'}))
+        parser.MatchTranslations(self._lines())
+        self.assertLoggedTrue("echo response rejected", any('echoes source line' in str(error) for error in parser.errors))
+
+
+class VietnameseTerminologyTests(SubtitleTestCase):
+    """Regression tests for Vietnamese-aware localization and terminology matching."""
+
+    def test_vietnamese_language_detection(self):
+        from PySubtrans.Instructions import IsVietnameseLanguage
+        self.assertLoggedTrue("vi code detected", IsVietnameseLanguage("vi"))
+        self.assertLoggedTrue("Vietnamese name detected", IsVietnameseLanguage("Vietnamese"))
+        self.assertLoggedFalse("English rejected", IsVietnameseLanguage("English"))
+
+    def test_vietnamese_context_does_not_match_inside_word(self):
+        translator = object.__new__(SubtitleTranslator)
+        self.assertLoggedTrue("whole Vietnamese term matches", translator._contains_term("Anh nói đúng rồi", "Anh"))
+        self.assertLoggedFalse("term does not match inside word", translator._contains_term("thànhcông", "công"))
+
+    def test_vietnamese_context_matches_cjk_substrings(self):
+        translator = object.__new__(SubtitleTranslator)
+        self.assertLoggedTrue("CJK name matches adjacent text", translator._contains_term("星野さん", "星野"))
+
+
+class FakePolishClient:
+    """Deterministic fake LLM client for scene-polish integration tests."""
+
+    def __init__(self, response: str):
+        self.response = response
+
+    def BuildTranslationPrompt(self, user_prompt, instructions, lines, context):
+        prompt = TranslationPrompt("fake polish", False)
+        prompt.prompt_template = "{prompt}"
+        prompt.GenerateMessages(instructions, lines, context)
+        return prompt
+
+    def RequestTranslation(self, prompt):
+        return Translation({'text': self.response})
+
+    def GetParser(self, task_type):
+        return TranslationParser(task_type, Options())
+
+
+class VietnamesePolishIntegrationTests(SubtitleTestCase):
+    """Integration tests for the fake two-pass Vietnamese polish flow."""
+
+    def _setup_scene(self, response: str):
+        subtitles = Subtitles(settings=SettingsType({
+            'movie_name': 'Fake Movie',
+            'description': 'A short dialogue scene.',
+            'names': ['Captain Lee'],
+            'target_language': 'Vietnamese',
+        }))
+        scene = SubtitleScene({'number': 1})
+        batch = scene.AddNewBatch()
+        batch._originals = [
+            SubtitleLine({'index': 1, 'text': 'Captain Lee is here.'}),
+            SubtitleLine({'index': 2, 'text': 'We should go.'}),
+        ]
+        batch._translated = [
+            SubtitleLine({'index': 1, 'text': 'Đại úy Lee đang ở đây.'}),
+            SubtitleLine({'index': 2, 'text': 'Chúng ta nên rời đi.'}),
+        ]
+        subtitles.scenes = [scene]
+
+        translator = object.__new__(SubtitleTranslator)
+        translator.client = FakePolishClient(response)
+        translator.user_prompt = 'Translate subtitles'
+        translator.instructions = Instructions({})
+        translator.max_history = 10
+        translator.user_terminology_map = {'Captain Lee': 'Đại úy Lee'}
+        translator.events = TranslationEvents()
+        translator.task_type = 'Translation'
+        translator.aborted = False
+        return subtitles, scene, translator, batch
+
+    def test_fake_polish_is_committed(self):
+        response = '#1\nTranslation>\nĐại úy Lee ở đây.\n\n#2\nTranslation>\nTa nên đi.'
+        subtitles, scene, translator, batch = self._setup_scene(response)
+        translator.PolishScene(subtitles, scene)
+        self.assertLoggedEqual('polished first line', 'Đại úy Lee ở đây.', batch.translated[0].text)
+        self.assertLoggedEqual('polished second line', 'Ta nên đi.', batch.translated[1].text)
+
+    def test_fake_invalid_polish_is_rolled_back(self):
+        response = '#1\nTranslation>\nĐại úy Lee ở đây.'
+        subtitles, scene, translator, batch = self._setup_scene(response)
+        translator.PolishScene(subtitles, scene)
+        self.assertLoggedEqual('original first line retained', 'Đại úy Lee đang ở đây.', batch.translated[0].text)
+        self.assertLoggedEqual('original second line retained', 'Chúng ta nên rời đi.', batch.translated[1].text)
+
+
+class VietnamesePolishValidationTests(SubtitleTestCase):
+    """Regression tests for safe second-pass polishing."""
+
+    def _translator(self) -> SubtitleTranslator:
+        translator = object.__new__(SubtitleTranslator)
+        translator.user_terminology_map = {'Captain Lee': 'Đại úy Lee'}
+        return translator
+
+    def _originals(self) -> list[SubtitleLine]:
+        return [
+            SubtitleLine({'index': 1, 'text': 'Captain Lee is here.'}),
+            SubtitleLine({'index': 2, 'text': 'We should go.'}),
+        ]
+
+    def _candidate(self, first: str = 'Đại úy Lee ở đây.', second: str = 'Ta nên đi.') -> list[SubtitleLine]:
+        return [
+            SubtitleLine({'index': 1, 'text': first}),
+            SubtitleLine({'index': 2, 'text': second}),
+        ]
+
+    def test_polish_accepts_aligned_vietnamese_output(self):
+        translator = self._translator()
+        originals = self._originals()
+        candidate = self._candidate()
+        self.assertLoggedTrue("valid polish accepted", translator._validate_polish(originals, candidate, [], []))
+
+    def test_polish_rejects_missing_line(self):
+        translator = self._translator()
+        originals = self._originals()
+        candidate = self._candidate()[:1]
+        self.assertLoggedFalse("missing polish line rejected", translator._validate_polish(originals, candidate, originals[1:], []))
+
+    def test_polish_rejects_glossary_violation(self):
+        translator = self._translator()
+        originals = self._originals()
+        candidate = self._candidate(first='Đội trưởng Lee ở đây.')
+        self.assertLoggedFalse("glossary violation rejected", translator._validate_polish(originals, candidate, [], []))
+
+    def test_polish_is_disabled_by_default(self):
+        self.assertLoggedFalse("polish disabled by default", self.options.get_bool('polish_translation', False))
 
 
 class TranslationEventsTests(SubtitleTestCase):

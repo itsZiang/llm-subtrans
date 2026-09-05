@@ -2,13 +2,14 @@ from os import linesep
 import logging
 import threading
 from typing import Any
+import regex
 
 from PySubtrans.Helpers.ContextHelpers import GetBatchContext
-from PySubtrans.Helpers.Parse import FormatKeyValuePairs
+from PySubtrans.Helpers.Parse import FormatKeyValuePairs, ParseKeyValuePairs
 from PySubtrans.Helpers.SubtitleHelpers import FindBestSplitIndex, MergeTranslations
 from PySubtrans.Helpers.Localization import _
 from PySubtrans.Helpers.Text import CompressWhitespace, Linearise, SanitiseSummary
-from PySubtrans.Instructions import DEFAULT_TASK_TYPE, Instructions
+from PySubtrans.Instructions import DEFAULT_TASK_TYPE, IsVietnameseLanguage, Instructions, default_polish_instructions, default_vietnamese_instructions
 from PySubtrans.Substitutions import Substitutions
 from PySubtrans.SubtitleLine import SubtitleLine
 from PySubtrans.SubtitleProcessor import SubtitleProcessor
@@ -47,9 +48,16 @@ class SubtitleTranslator:
         self.max_history = settings.get_int('max_context_summaries')
         self.stop_on_error = settings.get_bool('stop_on_error')
         self.retry_on_error = settings.get_bool('retry_on_error')
+        self.polish_translation = settings.get_bool('polish_translation', False)
+        self.polish_max_retries = settings.get_int('polish_max_retries') or 1
         self.split_on_error = settings.get_bool('autosplit_on_error')
         self.build_terminology_map = settings.get_bool('build_terminology_map')
-        self.terminology_map : dict[str, str] = dict(terminology_map) if terminology_map else {}
+        configured_terminology = ParseKeyValuePairs(settings.get('terminology_map', {}))
+        self.terminology_map : dict[str, str] = dict(configured_terminology)
+        if terminology_map:
+            # Explicitly supplied maps are authoritative over project settings.
+            self.terminology_map.update(terminology_map)
+        self.user_terminology_map : dict[str, str] = dict(self.terminology_map)
         self.max_summary_length = settings.get_int('max_summary_length')
         self.retranslate = settings.get_bool('retranslate')
         self.reparse = settings.get_bool('reparse')
@@ -63,6 +71,9 @@ class SubtitleTranslator:
         self.user_prompt : str = settings.BuildUserPrompt()
 
         self.system_instructions : str = self.instructions.instructions or ''
+        target_language = settings.get_str('target_language', '') or settings.get_str('to_language', '') or ''
+        if IsVietnameseLanguage(target_language):
+            self.system_instructions = f"{self.system_instructions}\n\n{default_vietnamese_instructions}".strip()
         if self.build_terminology_map and self.instructions.terminology_instructions:
             self.system_instructions = f"{self.system_instructions}\n\n{self.instructions.terminology_instructions}".strip()
 
@@ -215,11 +226,76 @@ class SubtitleTranslator:
             # Update the scene summary based on the best available information (we hope)
             scene.summary = self._get_best_summary([scene.summary, context.get('scene'), context.get('summary')])
 
+            if self.polish_translation and not self.preview and not self.aborted:
+                self.PolishScene(subtitles, scene)
+
             # Notify observers the scene was translated
             self.events.scene_translated.send(self, scene=scene)
 
         except (TranslationAbortedError, TranslationImpossibleError) as e:
             raise
+
+    def PolishScene(self, subtitles : Subtitles, scene : SubtitleScene) -> None:
+        """Polish a translated scene and keep the original if validation fails."""
+        originals = [line for batch in scene.batches for line in batch.originals]
+        translated = [line for batch in scene.batches for line in batch.translated if line.text]
+        if not originals or len(originals) != len(translated):
+            self._emit_warning(_("Skipping polish for scene {scene}: incomplete translation").format(scene=scene.number))
+            return
+
+        context = GetBatchContext(subtitles, scene.number, scene.batches[0].number, self.max_history)
+        context['current_translation'] = '\n'.join(
+            f"#{line.number}\nTranslation>\n{line.text or ''}" for line in translated
+        )
+        context['polish_scope'] = f"Scene {scene.number}"
+
+        prompt = self.client.BuildTranslationPrompt(
+            self.user_prompt,
+            self.instructions.polish_instructions or default_polish_instructions,
+            originals,
+            context,
+        )
+        polished = self.client.RequestTranslation(prompt)
+        if not polished:
+            self._emit_warning(_("Polish returned no translation for scene {scene}").format(scene=scene.number))
+            return
+
+        try:
+            prompt.RestoreMarkup(polished)
+            parser = self.client.GetParser(self.task_type)
+            parser.ProcessTranslation(polished)
+            candidate, unmatched = parser.MatchTranslations(originals)
+        except TranslationError as error:
+            self._emit_warning(_("Rejected polish for scene {scene}: {error}").format(scene=scene.number, error=error))
+            return
+
+        if not self._validate_polish(originals, candidate, unmatched, parser.errors):
+            self._emit_warning(_("Rejected polish for scene {scene}; keeping original translation").format(scene=scene.number))
+            return
+
+        by_number = {line.number: line for line in candidate}
+        for batch in scene.batches:
+            for line in batch.translated:
+                replacement = by_number.get(line.number)
+                if replacement:
+                    line.text = replacement.text
+        self._emit_info(_("Polished scene {scene}").format(scene=scene.number))
+
+    def _validate_polish(self, originals : list[SubtitleLine], candidate : list[SubtitleLine], unmatched : list[SubtitleLine], errors : list[Exception]) -> bool:
+        """Accept polish only when alignment, markup and glossary remain valid."""
+        if unmatched or errors or len(candidate) != len(originals):
+            return False
+        original_numbers = [line.number for line in originals]
+        candidate_numbers = [line.number for line in candidate]
+        if original_numbers != candidate_numbers:
+            return False
+        for source, output in zip(originals, candidate):
+            if not output.text or '__SUBTITLE_MARKUP_' in output.text:
+                return False
+            for term, target in self.user_terminology_map.items():
+                if self._contains_term(source.text or '', term) and not self._contains_term(output.text, target):
+                    return False
+        return True
 
     def TranslateBatch(self, batch : SubtitleBatch, line_numbers : list[int]|None, context : dict[str,Any]|None):
         """
@@ -264,6 +340,7 @@ class SubtitleTranslator:
                 raise TranslationError(_("Unable to translate scene {scene} batch {batch}").format(scene=batch.scene, batch=batch.number))
 
             # Process the response first — translation may be complete even if the token limit was hit
+            batch.prompt.RestoreMarkup(translation)
             self.ProcessBatchTranslation(batch, translation, line_numbers)
 
             # Consider splitting the batch in half if there were errors (preferred strategy)
@@ -347,6 +424,7 @@ class SubtitleTranslator:
         if line_numbers:
             translated = [line for line in translated if line.number in line_numbers]
 
+        self._apply_terminology_overrides(batch.originals, translated)
         batch._translated = MergeTranslations(batch.translated or [], translated)
 
         batch.translation = translation
@@ -422,6 +500,7 @@ class SubtitleTranslator:
 
         logging.debug(f"Scene {batch.scene} batch {batch.number} retranslation:\n{retranslation.text}\n")
 
+        prompt.RestoreMarkup(retranslation)
         self.ProcessBatchTranslation(batch, retranslation, line_numbers)
 
         if batch.errors:
@@ -452,6 +531,7 @@ class SubtitleTranslator:
 
         # Phase 1: collect raw translations from each half without processing
         half_translations : list[Translation] = []
+        half_output_texts : list[str] = []
         api_errors : list[str|SubtitleError] = []
 
         for half_originals in [originals[:split_index], originals[split_index:]]:
@@ -464,6 +544,20 @@ class SubtitleTranslator:
             if not half_translation:
                 api_errors.append(TranslationError(_("No translation returned for batch half")))
             else:
+                prompt.RestoreMarkup(half_translation)
+                # Some providers may echo the complete source batch even when
+                # asked for a half. Restrict split output to this half before
+                # merging, otherwise valid line numbers appear duplicated.
+                half_numbers = {line.number for line in half_originals}
+                half_parser = self.client.GetParser(self.task_type)
+                half_parser.ProcessTranslation(half_translation, validate=False)
+                filtered_lines = [line for line in half_parser.translated if line.number in half_numbers]
+                if filtered_lines:
+                    half_output_texts.append('\n\n'.join(
+                        f"#{line.number}\nTranslation>\n{line.text or ''}" for line in filtered_lines
+                    ))
+                else:
+                    half_output_texts.append(half_translation.text or '')
                 half_translations.append(half_translation)
 
         # Phase 2: merge translation texts and delegate all output handling to ProcessBatchTranslation
@@ -471,7 +565,7 @@ class SubtitleTranslator:
             batch.errors = api_errors
             return False
 
-        merged_text = "\n".join(t.text for t in half_translations if t.text)
+        merged_text = "\n".join(text for text in half_output_texts if text)
         merged_translation = Translation({'text': merged_text})
         merged_terminology : dict[str, str] = {}
         for half_translation in half_translations:
@@ -496,6 +590,28 @@ class SubtitleTranslator:
             original_translation.content['summary'] = next((t.summary for t in all_sources if t.summary), None)
             original_translation.content['scene']   = next((t.scene   for t in all_sources if t.scene),   None)
             original_translation.content['synopsis']= next((t.synopsis for t in all_sources if t.synopsis), None)
+            merged_terminology = {}
+            for source in all_sources:
+                if source.terminology:
+                    merged_terminology.update(source.terminology)
+            if merged_terminology:
+                original_translation.content['terminology'] = merged_terminology
+
+        # Split responses contain terminology learned from the individual
+        # halves. Persist it immediately; the normal scene loop may otherwise
+        # only inspect the original full-batch response. Use the source-content
+        # check here, while the normal path also requires target occurrence in
+        # output (the split response has already been filtered/reconstructed).
+        split_source_text = CompressWhitespace(' '.join(line.text or '' for line in batch.originals))
+        with self.lock:
+            for term, proposed in merged_terminology.items():
+                term_norm = str(term).strip()
+                proposed_norm = str(proposed).strip()
+                if (self._is_reliable_terminology(term_norm, proposed_norm)
+                        and self._contains_term(split_source_text, term_norm)
+                        and term_norm not in self.user_terminology_map
+                        and term_norm not in self.terminology_map):
+                    self.terminology_map[term_norm] = proposed_norm
 
         if batch.errors:
             self._emit_warning(_("Split retranslation has errors: {errors}").format(errors=FormatErrorMessages(batch.errors)))
@@ -569,6 +685,54 @@ class SubtitleTranslator:
         except Exception:
             pass
 
+    def _contains_term(self, text: str, term: str) -> bool:
+        """Match a terminology entry without corrupting Vietnamese words."""
+        if not text or not term:
+            return False
+        escaped = regex.escape(term.strip())
+        # Vietnamese uses Latin letters with combining marks, so \w provides
+        # the correct boundary for most words. CJK terms have no spaces and
+        # intentionally use substring matching.
+        if regex.search(r'\p{Letter}', term) and not regex.search(r'\p{Script=Han}|\p{Script=Hiragana}|\p{Script=Katakana}', term):
+            return bool(regex.search(rf'(?<![\p{{L}}\p{{M}}\p{{N}}_]){escaped}(?![\p{{L}}\p{{M}}\p{{N}}_])', text, regex.IGNORECASE))
+        return term.casefold() in text.casefold()
+
+    def _is_reliable_terminology(self, source : str, target : str) -> bool:
+        """Reject trivial or overly generic model terminology suggestions."""
+        if len(source) < 2 or len(target) < 1:
+            return False
+        if source.casefold() == target.casefold():
+            return False
+        if source.isdigit() or target.isdigit():
+            return False
+        # Do not learn isolated function words, punctuation, or a single
+        # alphabetic token that is likely ordinary dialogue.
+        if len(source.split()) == 1 and source.isascii() and source.isalpha() and len(source) < 4:
+            return False
+        return True
+
+    def _apply_terminology_overrides(self, originals : list[SubtitleLine], translated : list[SubtitleLine]) -> None:
+        """Apply safe, user-defined terminology overrides to translated lines."""
+        if not self.user_terminology_map:
+            return
+
+        original_by_number = {line.number: line.text or '' for line in originals}
+        terms = sorted(self.user_terminology_map.items(), key=lambda item: len(item[0]), reverse=True)
+        for line in translated:
+            source = original_by_number.get(line.number, '')
+            if not source or not line.text:
+                continue
+            updated = line.text
+            for original, target in terms:
+                if not original or not target or original not in source:
+                    continue
+                # Do not re-expand a correct target containing the source term.
+                if original != target and original in target:
+                    continue
+                pattern = regex.compile(rf'(?<!\\w){regex.escape(original)}(?!\\w)', regex.IGNORECASE)
+                updated = pattern.sub(lambda _: target, updated)
+            line.text = updated
+
     def _update_terminology_map(self, batch : SubtitleBatch):
         """
         Merge terminology returned by a batch translation into self.terminology_map.
@@ -589,22 +753,30 @@ class SubtitleTranslator:
                 term_norm = str(term).strip()
                 proposed_norm = str(proposed).strip()
 
+                if not self._is_reliable_terminology(term_norm, proposed_norm):
+                    continue
+
                 if term_norm == proposed_norm:
                     continue
 
                 # Orient the pair using batch content as ground truth.
                 # Swap if the key appears in translated but not originals.
-                if term_norm in translated_text and term_norm not in original_text:
+                if self._contains_term(translated_text, term_norm) and not self._contains_term(original_text, term_norm):
                     term, proposed = proposed, term
                     term_norm, proposed_norm = proposed_norm, term_norm
 
                 # Reject if the source term doesn't appear in originals — it's hallucinated.
-                if term_norm not in original_text:
+                if not self._contains_term(original_text, term_norm):
                     continue
 
                 # Reject if the proposed translation doesn't appear in translated —
                 # canonising unused renderings would push future batches toward them.
-                if proposed_norm not in translated_text:
+                if not self._contains_term(translated_text, proposed_norm):
+                    continue
+
+                # User-provided terminology is authoritative and must never be
+                # replaced by an inferred model suggestion.
+                if term_norm in self.user_terminology_map:
                     continue
 
                 existing = self.terminology_map.get(term)

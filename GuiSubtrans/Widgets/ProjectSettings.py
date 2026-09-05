@@ -68,6 +68,12 @@ class ProjectSettings(QGroupBox):
             'description': self._gettextvalue('description'),
             'names': ParseNames(self._gettextvalue('names')),
             'build_terminology_map': self._getcheckboxvalue('build_terminology_map'),
+            'translation_style': self._gettextvalue('translation_style'),
+            'translation_tone': self._gettextvalue('translation_tone'),
+            'formality': self._gettextvalue('formality'),
+            'addressing_style': self._gettextvalue('addressing_style'),
+            'reading_speed_guidance': self._gettextvalue('reading_speed_guidance'),
+            'polish_translation': self._getcheckboxvalue('polish_translation'),
             'substitutions': Substitutions.Parse(self._gettextvalue('substitutions')),
             'substitution_mode': self._gettextvalue('substitution_mode'),
             'terminology_map': self._gettextvalue('terminology_map') if 'terminology_map' in self.widgets else self.settings.get('terminology_map'),
@@ -143,6 +149,12 @@ class ProjectSettings(QGroupBox):
             self.AddMultiLineOption(_("Description"), settings, 'description')
             self.AddMultiLineOption(_("Names"), settings, 'names')
             self.AddCheckboxOption(_("Build Terminology Map"), settings, 'build_terminology_map')
+            self.AddMultiLineOption(_("Translation Style"), settings, 'translation_style')
+            self.AddMultiLineOption(_("Translation Tone"), settings, 'translation_tone')
+            self.AddMultiLineOption(_("Formality"), settings, 'formality')
+            self.AddMultiLineOption(_("Addressing Style"), settings, 'addressing_style')
+            self.AddMultiLineOption(_("Reading Speed Guidance"), settings, 'reading_speed_guidance')
+            self.AddCheckboxOption(_("Polish Translation with a Second LLM Pass"), settings, 'polish_translation')
             if settings.get('build_terminology_map'):
                 self.AddMultiLineOption(_("Terminology Map"), settings, 'terminology_map')
 

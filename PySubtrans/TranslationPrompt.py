@@ -1,13 +1,21 @@
 from typing import Any
+import regex
 
 from PySubtrans.Helpers.Localization import _
 from PySubtrans.SubtitleError import SubtitleError, TranslationError
 from PySubtrans.SubtitleLine import SubtitleLine
+from PySubtrans.Translation import Translation
 
 default_prompt_template: str = "<context>\n{context}\n</context>\n\n{prompt}\n\n<summary>Summary of the batch</summary>\n<scene>Summary of the scene</scene>\n"
 default_line_template: str = "#{number}\nOriginal>\n{text}\nTranslation>\n"
 default_tag_template: str = "<{tag}>{content}</{tag}>"
-default_context_tags: list[str] = ['description', 'names', 'terminology', 'history', 'scene', 'summary', 'batch']
+_PROTECTED_MARKUP_PATTERN = regex.compile(r'<(?:/?[A-Za-z][^>]*|br\s*/?)>|\{\\[^}]*\}')
+
+default_context_tags: list[str] = [
+    'description', 'names', 'terminology', 'history', 'scene', 'summary', 'batch',
+    'dialogue_before', 'dialogue_after', 'style', 'tone', 'formality',
+    'addressing_style', 'reading_speed_guidance', 'current_translation'
+]
 
 class TranslationPrompt:
     """
@@ -45,6 +53,7 @@ class TranslationPrompt:
         self.batch_prompt: str|None = None
         self.content: str|list[str]|list[dict[str, str]]|None = None
         self.messages: list[dict[str, str]] = []
+        self._markup_tokens: dict[str, str] = {}
 
     def GenerateMessages(self, instructions: str, lines: list[SubtitleLine], context: dict[str, Any]) -> None:
         """
@@ -55,6 +64,7 @@ class TranslationPrompt:
         :param context: dictionary of contextual information to include in the prompt
         """
         self.messages.clear()
+        self._markup_tokens.clear()
 
         user_role = "user"
         system_role = self.system_role if self.supports_system_messages else user_role
@@ -85,7 +95,7 @@ class TranslationPrompt:
         if not lines:
             raise TranslationError("No source lines provided")
 
-        source_lines: list[str|None] = [ _get_line_prompt(line, self.line_template) for line in lines ]
+        source_lines: list[str|None] = [ self._get_line_prompt(line) for line in lines ]
 
         real_lines = [line for line in source_lines if line is not None]
 
@@ -103,6 +113,61 @@ class TranslationPrompt:
             prompt = self.prompt_template.format(prompt=prompt, context=tag_lines)
 
         return prompt
+
+    def RestoreMarkup(self, translation: Translation) -> None:
+        """Restore subtitle markup tokens and reject incomplete markup output."""
+        if not self._markup_tokens or not translation or not translation.content:
+            return
+
+        text = translation.content.get('text')
+        if not isinstance(text, str):
+            raise TranslationError("Translation response does not contain text", translation=translation)
+
+        missing: list[str] = []
+        duplicated: list[str] = []
+        expected_markup_counts: dict[str, int] = {}
+        for token, markup in self._markup_tokens.items():
+            count = text.count(token)
+            if count > 1:
+                duplicated.append(token)
+            expected_markup_counts[markup] = expected_markup_counts.get(markup, 0) + 1
+            text = text.replace(token, markup)
+
+        # A retry may already contain restored markup. Validate the final
+        # markup multiset, so a missing token cannot be masked by an unrelated
+        # occurrence of the same tag and duplicated restored tags are rejected.
+        for markup, expected_count in expected_markup_counts.items():
+            actual_count = text.count(markup)
+            if actual_count < expected_count:
+                missing.append(markup)
+            elif actual_count > expected_count:
+                duplicated.append(markup)
+
+        if missing or duplicated:
+            problems = []
+            if missing:
+                problems.append(f"missing markup tokens: {', '.join(missing)}")
+            if duplicated:
+                problems.append(f"duplicated markup tokens: {', '.join(duplicated)}")
+            raise TranslationError("Invalid subtitle markup output: " + "; ".join(problems), translation=translation)
+
+        translation.content['text'] = text
+        translation._text = text
+
+    def _get_line_prompt(self, line: SubtitleLine) -> str|None:
+        """Format a line while replacing markup with opaque, reversible tokens."""
+        if not line.text or not line._index:
+            return None
+
+        text = line.text_normalized or ''
+        text = _PROTECTED_MARKUP_PATTERN.sub(self._protect_markup, text)
+        return self.line_template.format(number=line.number, text=text)
+
+    def _protect_markup(self, match: regex.Match) -> str:
+        """Create a stable placeholder for one subtitle markup fragment."""
+        token = f"__SUBTITLE_MARKUP_{len(self._markup_tokens) + 1}__"
+        self._markup_tokens[token] = match.group(0)
+        return token
 
     def GenerateRetryPrompt(self, reponse : str, retry_instructions : str, errors : list[SubtitleError|str]|None) -> None:
         """
@@ -174,7 +239,9 @@ def _generate_tag(tag : str, content : str|list[str], tag_template : str) -> str
     Generate tag with content using the provided template
     """
     if isinstance(content, list):
-        content = ', '.join(content)
+        content = '\n'.join(str(item) for item in content)
+    elif isinstance(content, dict):
+        content = '\n'.join(f'{key}: {value}' for key, value in content.items())
 
     return tag_template.format(tag=tag, content=content).strip()
 

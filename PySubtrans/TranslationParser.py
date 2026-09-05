@@ -68,7 +68,7 @@ class TranslationParser:
             raise TranslationError("No translated text provided", translation=translation)
 
         matches : list[dict[str,str]] = []
-
+        duplicate_response_numbers: set[str] = set()
         for template in self.regex_patterns:
             matches = self.FindMatches(f"{self.text}\n\n", template)
 
@@ -82,6 +82,12 @@ class TranslationParser:
         logging.debug(f"Matches: {str(matches)}")
 
         subs = [SubtitleLine(match) for match in matches]
+        duplicate_keys = {sub.key for sub in subs if sum(item.key == sub.key for item in subs) > 1}
+        if duplicate_keys:
+            self.errors.append(TranslationError(
+                f"Duplicate translation line numbers found: {sorted(duplicate_keys)}",
+                translation=self.text))
+
         self.translations = {
             sub.key: sub for sub in subs
             }
@@ -92,12 +98,16 @@ class TranslationParser:
         self.translated = MergeTranslations(self.translated, list(self.translations.values()))
 
         if validate:
-            self.errors = self.ValidateTranslations()
-
+            validation_errors = self.ValidateTranslations()
+            self.errors = validation_errors
             if self.errors and self.translated:
                 self._fix_unclosed_tags()
                 self.errors = self.ValidateTranslations()
 
+        if duplicate_keys:
+            self.errors.append(TranslationError(
+                f"Duplicate translation line numbers found: {sorted(duplicate_keys)}",
+                translation=self.text))
         return self.translated
 
     def FindMatches(self, text, template) -> list[dict[str,str]]:
@@ -121,6 +131,15 @@ class TranslationParser:
 
         matched = []
         unmatched = []
+        original_keys = {item.key for item in originals}
+
+        # Never silently accept an output line outside this batch. It can be a
+        # context line, a hallucinated line number, or a one-based shift.
+        unexpected = [translation for key, translation in self.translations.items() if key not in original_keys]
+        if unexpected:
+            self.errors.append(TranslationError(
+                f"Found {len(unexpected)} translation lines outside the requested batch",
+                translation=self.text))
 
         for item in originals:
             translation : SubtitleLine|None = self.translations.get(item.key)
@@ -138,6 +157,16 @@ class TranslationParser:
                 item.translation = translation.text
                 matched.append(translation)
 
+                # An exact copy of a different source cue is a strong signal
+                # that the model echoed context or shifted its output. Keep it
+                # visible for diagnostics, but force the batch into retry.
+                for other in originals:
+                    if other.key != item.key and IsTextContentEqual(translation.text, other.text):
+                        self.errors.append(TranslationError(
+                            f"Translation for line {item.number} echoes source line {other.number}",
+                            translation=self.text))
+                        break
+
             else:
                 item.translation = None
                 unmatched.append(item)
@@ -146,9 +175,33 @@ class TranslationParser:
             self.TryFuzzyMatches(unmatched)
 
         if unmatched:
+            # Fuzzy matching is diagnostic only. Never treat a guessed mapping
+            # as complete, because a shifted line can otherwise ship silently.
             self.errors.append(UntranslatedLinesError(f"No translation found for {len(unmatched)} lines", lines=unmatched))
 
+        self._detect_one_based_shift(originals)
         return matched, unmatched
+
+    def _detect_one_based_shift(self, originals: list[SubtitleLine]) -> None:
+        """Reject a complete response whose line numbers are shifted by one."""
+        if not originals or not self.translations:
+            return
+
+        original_numbers = [line.number for line in originals]
+        response_numbers = list(self.translations.keys())
+        if not all(isinstance(number, int) for number in response_numbers):
+            return
+        if len(response_numbers) != len(original_numbers):
+            return
+
+        original_set = set(original_numbers)
+        response_set = set(response_numbers)
+        shifted_up = {number + 1 for number in original_numbers}
+        shifted_down = {number - 1 for number in original_numbers}
+        if response_set == shifted_up or response_set == shifted_down:
+            self.errors.append(TranslationError(
+                "Translation line numbers appear to be shifted by one",
+                translation=self.text))
 
     def TryFuzzyMatches(self, unmatched : list [SubtitleLine]) -> None:
         """

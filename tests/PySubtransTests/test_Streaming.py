@@ -8,6 +8,7 @@ from PySubtrans.Helpers.Tests import log_info, skip_if_debugger_attached
 from PySubtrans.SettingsType import SettingsType, SettingType
 from PySubtrans.SubtitleBatch import SubtitleBatch
 from PySubtrans.SubtitleBuilder import SubtitleBuilder
+from PySubtrans.SubtitleLine import SubtitleLine
 from PySubtrans.SubtitleError import TranslationError
 from PySubtrans.SubtitleTranslator import SubtitleTranslator
 from PySubtrans.Translation import Translation
@@ -184,6 +185,41 @@ class StreamingTests(SubtitleTestCase):
             assert batch.scene is not None  # PyLance hint
             self.assertEqual(batch.number, 1)  # We know it's batch 1
             self.assertEqual(batch.scene, 1)   # We know it's scene 1
+
+    def test_markup_protection_and_restore(self):
+        """Markup is replaced in prompts and restored in translation output."""
+        prompt = TranslationPrompt("Translate", True)
+        line = SubtitleLine({'index': 1, 'text': r'<i>Hello</i> {\\an8} world'})
+        prompt.GenerateMessages("Translate naturally", [line], {})
+
+        self.assertLoggedNotIn("raw markup absent from prompt", "<i>", prompt.batch_prompt)
+        self.assertLoggedIn("markup token present", "__SUBTITLE_MARKUP_", prompt.batch_prompt)
+
+        translation = Translation({'text': "#1\nTranslation>\n__SUBTITLE_MARKUP_1__Hola__SUBTITLE_MARKUP_2__ __SUBTITLE_MARKUP_3__ mundo"})
+        prompt.RestoreMarkup(translation)
+        self.assertLoggedIn("restored opening tag", "<i>", translation.text)
+        self.assertLoggedIn("restored closing tag", "</i>", translation.text)
+        self.assertLoggedIn("restored ASS tag", r"{\\an8}", translation.text)
+
+    def test_markup_restore_accepts_already_restored_markup_on_retry(self):
+        """A retry may contain restored markup from the previous response."""
+        prompt = TranslationPrompt("Translate", True)
+        line = SubtitleLine({'index': 1, 'text': '<i>Hello</i>'})
+        prompt.GenerateMessages("Translate", [line], {})
+        first = Translation({'text': "#1\nTranslation>\n__SUBTITLE_MARKUP_1__Xin__SUBTITLE_MARKUP_2__"})
+        prompt.RestoreMarkup(first)
+        retry = Translation({'text': "#1\nTranslation>\n<i>Xin</i>"})
+        prompt.RestoreMarkup(retry)
+        self.assertLoggedEqual("restored markup remains intact", "<i>Xin</i>", retry.text.split("Translation>\n", 1)[1])
+
+    def test_markup_restore_rejects_missing_token(self):
+        """Markup loss is an error rather than silently shipping broken tags."""
+        prompt = TranslationPrompt("Translate", True)
+        line = SubtitleLine({'index': 1, 'text': '<i>Hello</i>'})
+        prompt.GenerateMessages("Translate", [line], {})
+        translation = Translation({'text': "#1\nTranslation>\n__SUBTITLE_MARKUP_1__Hola"})
+        with self.assertRaises(TranslationError):
+            prompt.RestoreMarkup(translation)
 
     def test_partial_response_processing(self):
         """Test that partial responses are processed correctly"""

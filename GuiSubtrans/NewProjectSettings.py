@@ -35,6 +35,12 @@ class NewProjectSettings(QDialog):
         'max_batch_size': (int, _("Most lines to send in each batch")),
         'preprocess_subtitles': (bool, _("Preprocess subtitles before batching")),
         'build_terminology_map': (bool, _("Build a terminology map during translation to keep terminology consistent")),
+        'translation_style': (str, _("Desired translation style, for example natural spoken dialogue")),
+        'translation_tone': (str, _("Desired emotional tone and character voice")),
+        'formality': (str, _("Formality and register rules")),
+        'addressing_style': (str, _("Pronoun and form-of-address rules")),
+        'reading_speed_guidance': (str, _("Guidance for concise, readable subtitles")),
+        'polish_translation': (bool, _("Run a second LLM pass to improve Vietnamese fluency after translation")),
         'instruction_file': (str, _("Detailed instructions for the translator")),
         'prompt': (str, _("High-level instructions for the translator")),
         'format': (str, _("Output subtitle format"))
