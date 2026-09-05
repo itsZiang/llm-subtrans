@@ -20,6 +20,14 @@ MULTILINE_OPTION = 'multiline'
 
 settings_path = os.path.join(config_dir, 'settings.json')
 
+# Vietnamese subtitle defaults. These are intentionally editable at project
+# level, but provide a useful natural-dialogue baseline without configuration.
+DEFAULT_VIETNAMESE_TRANSLATION_STYLE = 'Natural spoken Vietnamese subtitle dialogue. Avoid literal translation and stiff written prose.'
+DEFAULT_VIETNAMESE_TRANSLATION_TONE = 'Preserve each character\'s personality, emotional state, sarcasm, humor, tension and subtext.'
+DEFAULT_VIETNAMESE_FORMALITY = 'Choose formal or informal Vietnamese based on age, status, relationship and situation. Do not force every line into the same register.'
+DEFAULT_VIETNAMESE_ADDRESSING_STYLE = 'Choose Vietnamese pronouns and forms of address based on age, hierarchy, intimacy and conflict. Keep them consistent unless the relationship changes.'
+DEFAULT_VIETNAMESE_READING_SPEED_GUIDANCE = 'Keep subtitle lines concise and readable. Prefer short natural phrases, but preserve important meaning and emotional nuance.'
+
 # Load environment variables from .env file
 dotenv.load_dotenv()
 
@@ -61,11 +69,11 @@ default_settings = {
     'max_batch_size': env_int('MAX_BATCH_SIZE', 30),
     'max_context_summaries': env_int('MAX_CONTEXT_SUMMARIES', 10),
     'max_context_lines': env_int('MAX_CONTEXT_LINES', 50),
-    'translation_style': env_str('TRANSLATION_STYLE', 'Natural, fluent subtitle dialogue'),
-    'translation_tone': env_str('TRANSLATION_TONE', 'Conversational and emotionally appropriate'),
-    'formality': env_str('TRANSLATION_FORMALITY', 'Natural for the relationship and situation'),
-    'addressing_style': env_str('ADDRESSING_STYLE', ''),
-    'reading_speed_guidance': env_str('READING_SPEED_GUIDANCE', 'Keep subtitles concise enough to read comfortably without losing meaning'),
+    'translation_style': env_str('TRANSLATION_STYLE', DEFAULT_VIETNAMESE_TRANSLATION_STYLE),
+    'translation_tone': env_str('TRANSLATION_TONE', DEFAULT_VIETNAMESE_TRANSLATION_TONE),
+    'formality': env_str('TRANSLATION_FORMALITY', DEFAULT_VIETNAMESE_FORMALITY),
+    'addressing_style': env_str('ADDRESSING_STYLE', DEFAULT_VIETNAMESE_ADDRESSING_STYLE),
+    'reading_speed_guidance': env_str('READING_SPEED_GUIDANCE', DEFAULT_VIETNAMESE_READING_SPEED_GUIDANCE),
     'polish_translation': env_bool('POLISH_TRANSLATION', False),
     'polish_max_retries': env_int('POLISH_MAX_RETRIES', 1),
     'max_characters': env_int('MAX_CHARACTERS', 120),

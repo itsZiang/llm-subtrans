@@ -125,23 +125,20 @@ class TranslationPrompt:
 
         missing: list[str] = []
         duplicated: list[str] = []
-        expected_markup_counts: dict[str, int] = {}
         for token, markup in self._markup_tokens.items():
             count = text.count(token)
-            if count > 1:
+            if count == 0:
+                # A retry may already contain restored markup. Accept it only
+                # when the exact markup is present; otherwise markup loss
+                # remains a hard error.
+                if markup not in text:
+                    missing.append(token)
+            elif count > 2:
+                # One occurrence in Translation plus one optional echo of the
+                # Original block is valid. More than that is a real duplication.
                 duplicated.append(token)
-            expected_markup_counts[markup] = expected_markup_counts.get(markup, 0) + 1
-            text = text.replace(token, markup)
-
-        # A retry may already contain restored markup. Validate the final
-        # markup multiset, so a missing token cannot be masked by an unrelated
-        # occurrence of the same tag and duplicated restored tags are rejected.
-        for markup, expected_count in expected_markup_counts.items():
-            actual_count = text.count(markup)
-            if actual_count < expected_count:
-                missing.append(markup)
-            elif actual_count > expected_count:
-                duplicated.append(markup)
+            else:
+                text = text.replace(token, markup)
 
         if missing or duplicated:
             problems = []

@@ -249,13 +249,19 @@ class TranslationParser:
         if not last_line.text:
             return
 
-        # Use a regex to check for opening metatags and ensure there is a matching close tag. If not, truncate the text at the tag.
+        # An unclosed summary/scene/terminology tag usually means the model
+        # appended metadata to the final subtitle line. Split it back out for
+        # the terminology/summary pipeline instead of failing the whole batch.
         re_opening = regex.compile(rf"<({'|'.join(self.metatags)})>", regex.IGNORECASE)
 
         for match in re_opening.finditer(last_line.text):
             tag = match.group(1)
             if not regex.search(rf"</{tag}>", last_line.text):
+                leaked = last_line.text[match.start():].strip()
                 self.warnings.append(_("Found unclosed tag {tag} in translation").format(tag=tag))
-                last_line.text = last_line.text[:match.start()]
+                last_line.text = last_line.text[:match.start()].rstrip()
+                if self.text is not None:
+                    separator = "\n" if not self.text.endswith("\n") else ""
+                    self.text = f"{self.text}{separator}{leaked}"
                 break
             

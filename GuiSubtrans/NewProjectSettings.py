@@ -17,6 +17,13 @@ from PySubtrans.SubtitleProcessor import SubtitleProcessor
 from PySubtrans.SubtitleProject import SubtitleProject
 from PySubtrans.SubtitleScene import SubtitleScene
 from PySubtrans.Helpers.Localization import _
+from PySubtrans.Options import (
+    DEFAULT_VIETNAMESE_ADDRESSING_STYLE,
+    DEFAULT_VIETNAMESE_FORMALITY,
+    DEFAULT_VIETNAMESE_READING_SPEED_GUIDANCE,
+    DEFAULT_VIETNAMESE_TRANSLATION_STYLE,
+    DEFAULT_VIETNAMESE_TRANSLATION_TONE,
+)
 from PySubtrans.SubtitleFormatRegistry import SubtitleFormatRegistry
 
 if os.environ.get("DEBUG_MODE") == "1":
@@ -56,6 +63,11 @@ class NewProjectSettings(QDialog):
         self.datamodel = datamodel
         self.project : SubtitleProject|None = datamodel.project
         self.settings = datamodel.project_options.GetSettings()
+        self.settings.setdefault('translation_style', DEFAULT_VIETNAMESE_TRANSLATION_STYLE)
+        self.settings.setdefault('translation_tone', DEFAULT_VIETNAMESE_TRANSLATION_TONE)
+        self.settings.setdefault('formality', DEFAULT_VIETNAMESE_FORMALITY)
+        self.settings.setdefault('addressing_style', DEFAULT_VIETNAMESE_ADDRESSING_STYLE)
+        self.settings.setdefault('reading_speed_guidance', DEFAULT_VIETNAMESE_READING_SPEED_GUIDANCE)
 
         self.providers = datamodel.available_providers
         self.OPTIONS['provider'] = (self.providers, self.OPTIONS['provider'][1])
