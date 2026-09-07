@@ -2,15 +2,19 @@ import logging
 import os
 from typing import cast
 from PySide6.QtWidgets import (
-    QGroupBox,
-    QVBoxLayout,
-    QLabel,
-    QLineEdit,
     QCheckBox,
-    QPushButton,
     QComboBox,
     QDialog,
-    QFileDialog
+    QFileDialog,
+    QFrame,
+    QGroupBox,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QScrollArea,
+    QSizePolicy,
+    QVBoxLayout,
+    QWidget
 )
 from PySide6.QtCore import Qt, QEvent, QObject, Signal, QSignalBlocker
 from GuiSubtrans.EditInstructionsDialog import EditInstructionsDialog
@@ -38,6 +42,8 @@ class ProjectSettings(QGroupBox):
         super().__init__(parent=parent)
         self.setTitle(_("Project Settings"))
         self.setMinimumWidth(450)
+        self.setMinimumHeight(0)
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
 
         self.action_handler : ProjectActions|None = action_handler
         self.provider_list = sorted(TranslationProvider.get_providers())
@@ -51,9 +57,21 @@ class ProjectSettings(QGroupBox):
         self._terminology_filter_installed : bool = False
 
         self._layout = QVBoxLayout(self)
+        self._layout.setContentsMargins(0, 0, 0, 0)
+        self._scroll_area = QScrollArea(self)
+        self._scroll_area.setWidgetResizable(True)
+        self._scroll_area.setFrameShape(QFrame.Shape.NoFrame)
+        self._scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self._scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self._scroll_area.setMinimumHeight(0)
+        self._scroll_area.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
+        self._form_container = QWidget(self._scroll_area)
+        self._form_container.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
         self.grid_layout = OptionsGrid()
+        self._form_container.setLayout(self.grid_layout)
+        self._scroll_area.setWidget(self._form_container)
 
-        self._layout.addLayout(self.grid_layout)
+        self._layout.addWidget(self._scroll_area)
         self._terminologyTermsAddedInternal.connect(self._on_terminology_terms_added, Qt.ConnectionType.QueuedConnection)
 
     def GetSettings(self) -> SettingsType:

@@ -18,6 +18,8 @@ class SelectionView(QFrame):
 
     def __init__(self, action_handler : ProjectActions, parent=None):
         super().__init__(parent=parent)
+        self.setMinimumHeight(0)
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
 
         self.selection = None
         self.action_handler = action_handler

@@ -1,5 +1,5 @@
 import logging
-from PySide6.QtWidgets import QVBoxLayout, QWidget, QDialog
+from PySide6.QtWidgets import QDialog, QSizePolicy, QVBoxLayout, QWidget
 from PySide6.QtCore import Qt, Signal, Slot
 from GuiSubtrans.ProjectActions import ProjectActions
 from GuiSubtrans.ViewModel.LineItem import LineItem
@@ -27,6 +27,8 @@ class ContentView(QWidget):
         self.viewmodel = None
 
         self.subtitle_view = SubtitleView(parent=self)
+        self.subtitle_view.setMinimumHeight(100)
+        self.subtitle_view.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
 
         self.selection_view = SelectionView(action_handler=action_handler, parent=self)
         self.selection_view.resetSelection.connect(self.ClearSelectedLines)
@@ -38,9 +40,12 @@ class ContentView(QWidget):
         self.subtitle_view.editLine.connect(self._edit_line)
 
         layout = QVBoxLayout()
-        layout.addWidget(self.subtitle_view)
-        layout.addWidget(self.selection_view)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self.subtitle_view, 1)
+        layout.addWidget(self.selection_view, 0)
         self.setLayout(layout)
+        self.setMinimumHeight(0)
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
 
     def ShowSelection(self, selection : ProjectSelection):
         if selection.AnyScenes() or selection.AnyBatches():

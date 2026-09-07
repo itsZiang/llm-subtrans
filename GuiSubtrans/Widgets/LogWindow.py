@@ -2,7 +2,7 @@ import logging
 
 from PySide6.QtCore import Qt, Signal, Slot
 from PySide6.QtGui import QTextCursor, QTextCharFormat, QColor
-from PySide6.QtWidgets import QTextEdit
+from PySide6.QtWidgets import QSizePolicy, QTextEdit
 
 class LogWindow(QTextEdit):
     enqueue = Signal(str, str)
@@ -18,6 +18,8 @@ class LogWindow(QTextEdit):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setReadOnly(True)
+        self.setMinimumHeight(60)
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
 
         self.enqueue.connect(self._append, Qt.ConnectionType.QueuedConnection)
 

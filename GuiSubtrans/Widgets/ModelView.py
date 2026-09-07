@@ -1,4 +1,4 @@
-from PySide6.QtWidgets import QWidget, QSplitter, QHBoxLayout
+from PySide6.QtWidgets import QHBoxLayout, QSizePolicy, QSplitter, QWidget
 from PySide6.QtCore import Qt, Signal
 from GuiSubtrans.ProjectActions import ProjectActions
 from GuiSubtrans.ProjectDataModel import ProjectDataModel
@@ -23,6 +23,8 @@ class ModelView(QWidget):
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
+        self.setMinimumHeight(0)
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
 
         self._toolbar = project_toolbar if project_toolbar is not None else ProjectToolbar(parent=self, action_handler=action_handler)
         self._toolbar.setVisible(False)
@@ -44,10 +46,13 @@ class ModelView(QWidget):
 
         # Splitter
         splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.setChildrenCollapsible(False)
         if project_settings is None:
             splitter.addWidget(self.project_settings)
         splitter.addWidget(self.scenes_view)
         splitter.addWidget(self.content_view)
+        self.scenes_view.setMinimumHeight(0)
+        self.content_view.setMinimumHeight(0)
         
         if project_settings is None:
             splitter.setStretchFactor(0, 2)

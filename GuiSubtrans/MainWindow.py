@@ -32,6 +32,7 @@ class MainWindow(QMainWindow):
 
         self.setWindowTitle(_("GUI-Subtrans"))
         self.setGeometry(100, 100, 1600, 900)
+        self.setMinimumSize(800, 400)
         self._load_icon("gui-subtrans")
 
         self._create_gui_interface(options)
@@ -76,12 +77,21 @@ class MainWindow(QMainWindow):
         
         self.model_viewer = ModelView(action_handler, project_settings=self.project_settings, project_toolbar=self.project_toolbar, parent=splitter)
         self.model_viewer.settingsChanged.connect(self.gui_interface.UpdateProjectSettings)
+        self.model_viewer.setMinimumHeight(0)
         splitter.addWidget(self.model_viewer)
 
         # Create the log window widget and add it to the splitter
         log_window_widget = LogWindow(splitter)
+        log_window_widget.setMinimumHeight(60)
         splitter.addWidget(log_window_widget)
+        splitter.setCollapsible(0, False)
+        splitter.setCollapsible(1, True)
+        splitter.setChildrenCollapsible(False)
         splitter.setSizes([int(self.height() * 0.8), int(self.height() * 0.2)])
+
+        main_h_splitter.setCollapsible(0, True)
+        main_h_splitter.setCollapsible(1, False)
+        main_h_splitter.setChildrenCollapsible(False)
 
         main_h_splitter.setStretchFactor(0, 0)
         main_h_splitter.setStretchFactor(1, 1)
